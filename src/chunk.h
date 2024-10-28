@@ -6,6 +6,11 @@
 typedef enum {
     OP_CONSTANT, // constant with 1 byte index
     OP_CONSTANT_LONG, // constant with 3 byte index
+    OP_NEGATE,
+    OP_ADD,
+    OP_SUBTRACT,
+    OP_MULTIPLY,
+    OP_DIVIDE,
     OP_RETURN,
 } OpCode;
 

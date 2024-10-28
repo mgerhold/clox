@@ -9,6 +9,8 @@ add_executable(clox
         debug.c
         value.h
         value.c
+        vm.h
+        vm.c
 )
 
 target_link_libraries(clox
