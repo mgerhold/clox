@@ -11,6 +11,10 @@ add_executable(clox
         value.c
         vm.h
         vm.c
+        compiler.h
+        compiler.c
+        scanner.h
+        scanner.c
 )
 
 target_link_libraries(clox

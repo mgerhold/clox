@@ -1,5 +1,6 @@
 #include "vm.h"
 #include <stdio.h>
+#include "compiler.h"
 #include "debug.h"
 
 VM vm;
@@ -14,7 +15,8 @@ void init_vm() {
 
 void free_vm() {}
 
-[[nodiscard]] static InterpretResult run() {
+// TODO: Make function static again.
+[[nodiscard]] InterpretResult run() {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
 #define BINARY_OP(op) \
@@ -22,7 +24,7 @@ void free_vm() {}
         auto const b = pop(); \
         auto const a = pop(); \
         push(a op b); \
-    } while(false)
+    } while (false)
 
     for (;;) {
 #ifdef DEBUG_TRACE_EXECUTION
@@ -56,13 +58,17 @@ void free_vm() {}
                 push(-pop());
                 break;
             case OP_ADD:
-                BINARY_OP(+); break;
+                BINARY_OP(+);
+                break;
             case OP_SUBTRACT:
-                BINARY_OP(-); break;
+                BINARY_OP(-);
+                break;
             case OP_MULTIPLY:
-                BINARY_OP(*); break;
+                BINARY_OP(*);
+                break;
             case OP_DIVIDE:
-                BINARY_OP(/); break;
+                BINARY_OP(/);
+                break;
             case OP_RETURN: {
                 print_value(pop());
                 printf("\n");
@@ -76,10 +82,9 @@ void free_vm() {}
 #undef BINARY_OP
 }
 
-[[nodiscard]] InterpretResult interpret(Chunk const* const chunk) {
-    vm.chunk = chunk;
-    vm.ip = vm.chunk->code;
-    return run();
+[[nodiscard]] InterpretResult interpret(char const* const source) {
+    compile(source);
+    return INTERPRET_OK;
 }
 
 void push(Value const value) {
