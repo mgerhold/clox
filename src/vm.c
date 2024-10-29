@@ -83,8 +83,19 @@ void free_vm() {}
 }
 
 [[nodiscard]] InterpretResult interpret(char const* const source) {
-    compile(source);
-    return INTERPRET_OK;
+    Chunk chunk;
+    init_chunk(&chunk);
+    if (not compile(source, &chunk)) {
+        free_chunk(&chunk);
+        return INTERPRET_COMPILE_ERROR;
+    }
+
+    vm.chunk = &chunk;
+    vm.ip = vm.chunk->code;
+
+    auto const result = run();
+    free_chunk(&chunk);
+    return result;
 }
 
 void push(Value const value) {

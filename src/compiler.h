@@ -1,3 +1,5 @@
 #pragma once
 
-void compile(const char* source);
+#include "vm.h"
+
+[[nodiscard]] bool compile(char const* source, Chunk* chunk);
