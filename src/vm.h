@@ -22,4 +22,4 @@ void init_vm();
 void free_vm();
 [[nodiscard]] InterpretResult interpret(const char* source);
 void push(Value value);
-Value pop();
+[[nodiscard]] Value pop();

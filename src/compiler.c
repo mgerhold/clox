@@ -148,10 +148,27 @@ static void binary() {
     parse_precedence((Precedence)(rule->precedence + 1));
     // clang-format off
     switch (operator_type) {
-        case TOKEN_PLUS:  emit_byte(OP_ADD);      break;
-        case TOKEN_MINUS: emit_byte(OP_SUBTRACT); break;
-        case TOKEN_STAR:  emit_byte(OP_MULTIPLY); break;
-        case TOKEN_SLASH: emit_byte(OP_DIVIDE);   break;
+        case TOKEN_BANG_EQUAL:    emit_bytes(OP_EQUAL, OP_NOT);   break;
+        case TOKEN_EQUAL_EQUAL:   emit_byte(OP_EQUAL);            break;
+        case TOKEN_GREATER:       emit_byte(OP_GREATER);          break;
+        case TOKEN_GREATER_EQUAL: emit_bytes(OP_LESS, OP_NOT);    break;
+        case TOKEN_LESS:          emit_byte(OP_LESS);             break;
+        case TOKEN_LESS_EQUAL:    emit_bytes(OP_GREATER, OP_NOT); break;
+        case TOKEN_PLUS:          emit_byte(OP_ADD);              break;
+        case TOKEN_MINUS:         emit_byte(OP_SUBTRACT);         break;
+        case TOKEN_STAR:          emit_byte(OP_MULTIPLY);         break;
+        case TOKEN_SLASH:         emit_byte(OP_DIVIDE);           break;
+        default: return; // Unreachable.
+    }
+    // clang-format on
+}
+
+static void literal() {
+    // clang-format off
+    switch (parser.previous.type) {
+        case TOKEN_FALSE: emit_byte(OP_FALSE); break;
+        case TOKEN_NIL:   emit_byte(OP_NIL);   break;
+        case TOKEN_TRUE:  emit_byte(OP_TRUE);  break;
         default: return; // Unreachable.
     }
     // clang-format on
@@ -164,7 +181,7 @@ static void grouping() {
 
 static void number() {
     auto const value = strtod(parser.previous.start, nullptr);
-    emit_constant(value);
+    emit_constant(NUMBER_VAL(value));
 }
 
 static void unary() {
@@ -176,52 +193,57 @@ static void unary() {
     // Emit the operator instruction.
     // clang-format off
     switch (operator_type) {
+        case TOKEN_BANG:  emit_byte(OP_NOT);    break;
         case TOKEN_MINUS: emit_byte(OP_NEGATE); break;
         default: return; // Unreachable.
     }
     // clang-format on
 }
 
+// clang-format off
 static ParseRule const rules[] = {
-    [TOKEN_LEFT_PAREN] = { grouping, nullptr, PREC_NONE, },
-    [TOKEN_RIGHT_PAREN] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_LEFT_BRACE] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_RIGHT_BRACE] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_COMMA] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_DOT] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_MINUS] = { unary, binary, PREC_TERM, },
-    [TOKEN_PLUS] = { nullptr, binary, PREC_TERM, },
-    [TOKEN_SEMICOLON] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_SLASH] = { nullptr, binary, PREC_FACTOR, },
-    [TOKEN_STAR] = { nullptr, binary, PREC_FACTOR, },
-    [TOKEN_BANG] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_BANG_EQUAL] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_GREATER] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_GREATER_EQUAL] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_LESS] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_LESS_EQUAL] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_IDENTIFIER] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_STRING] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_NUMBER] = { number, nullptr, PREC_NONE, },
-    [TOKEN_AND] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_CLASS] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_ELSE] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_FALSE] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_FOR] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_FUN] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_IF] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_NIL] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_OR] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_PRINT] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_RETURN] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_SUPER] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_THIS] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_TRUE] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_VAR] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_WHILE] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_ERROR] = { nullptr, nullptr, PREC_NONE, },
-    [TOKEN_EOF] = { nullptr, nullptr, PREC_NONE, },
+    [TOKEN_LEFT_PAREN]    = { grouping, nullptr, PREC_NONE       },
+    [TOKEN_RIGHT_PAREN]   = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_LEFT_BRACE]    = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_RIGHT_BRACE]   = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_COMMA]         = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_DOT]           = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_MINUS]         = { unary,    binary,  PREC_TERM       },
+    [TOKEN_PLUS]          = { nullptr,  binary,  PREC_TERM       },
+    [TOKEN_SEMICOLON]     = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_SLASH]         = { nullptr,  binary,  PREC_FACTOR     },
+    [TOKEN_STAR]          = { nullptr,  binary,  PREC_FACTOR     },
+    [TOKEN_BANG]          = { unary,    nullptr, PREC_NONE       },
+    [TOKEN_BANG_EQUAL]    = { nullptr,  binary,  PREC_EQUALITY   },
+    [TOKEN_GREATER]       = { nullptr,  binary,  PREC_COMPARISON },
+    [TOKEN_GREATER_EQUAL] = { nullptr,  binary,  PREC_COMPARISON },
+    [TOKEN_LESS]          = { nullptr,  binary,  PREC_COMPARISON },
+    [TOKEN_LESS_EQUAL]    = { nullptr,  binary,  PREC_COMPARISON },
+    [TOKEN_EQUAL]         = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_EQUAL_EQUAL]   = { nullptr,  binary,  PREC_EQUALITY   },
+    [TOKEN_IDENTIFIER]    = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_STRING]        = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_NUMBER]        = { number,   nullptr, PREC_NONE       },
+    [TOKEN_AND]           = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_CLASS]         = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_ELSE]          = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_FALSE]         = { literal,  nullptr, PREC_NONE       },
+    [TOKEN_FOR]           = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_FUN]           = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_IF]            = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_NIL]           = { literal,  nullptr, PREC_NONE       },
+    [TOKEN_OR]            = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_PRINT]         = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_RETURN]        = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_SUPER]         = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_THIS]          = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_TRUE]          = { literal,  nullptr, PREC_NONE       },
+    [TOKEN_VAR]           = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_WHILE]         = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_ERROR]         = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_EOF]           = { nullptr,  nullptr, PREC_NONE       },
 };
+// clang-format on
 
 static void parse_precedence(Precedence const precedence) {
     advance();

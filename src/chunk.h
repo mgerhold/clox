@@ -4,13 +4,20 @@
 #include "value.h"
 
 typedef enum {
-    OP_CONSTANT, // constant with 1 byte index
-    OP_CONSTANT_LONG, // constant with 3 byte index
+    OP_CONSTANT,  // constant with 1 byte index
+    OP_CONSTANT_LONG,  // constant with 3 byte index
+    OP_NIL,
+    OP_TRUE,
+    OP_FALSE,
+    OP_EQUAL,
+    OP_GREATER,
+    OP_LESS,
     OP_NEGATE,
     OP_ADD,
     OP_SUBTRACT,
     OP_MULTIPLY,
     OP_DIVIDE,
+    OP_NOT,
     OP_RETURN,
 } OpCode;
 
