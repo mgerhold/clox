@@ -1,6 +1,8 @@
 #include "value.h"
 #include <stdio.h>
+#include <string.h>
 #include "memory.h"
+#include "object.h"
 
 void init_value_array(ValueArray* const array) {
     array->values = nullptr;
@@ -35,6 +37,9 @@ void print_value(Value const value) {
         case VAL_NUMBER:
             printf("%g", AS_NUMBER(value));
             break;
+        case VAL_OBJ:
+            print_object(value);
+            break;
     }
 }
 
@@ -47,6 +52,14 @@ void print_value(Value const value) {
         case VAL_BOOL:   return AS_BOOL(a) == AS_BOOL(b);
         case VAL_NIL:    return true;
         case VAL_NUMBER: return AS_NUMBER(a) == AS_NUMBER(b);
+        case VAL_OBJ: {
+            auto const a_string = AS_STRING(a);
+            auto const b_string = AS_STRING(b);
+            return
+                a_string->length == b_string->length
+                and memcmp(a_string->chars, b_string->chars, (size_t)a_string->length) == 0;
+
+        }
         default:         return false; // Unreachable.
     }
     // clang-format on

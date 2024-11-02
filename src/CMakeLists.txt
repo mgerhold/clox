@@ -15,6 +15,8 @@ add_executable(clox
         compiler.c
         scanner.h
         scanner.c
+        object.h
+        object.c
 )
 
 target_link_libraries(clox

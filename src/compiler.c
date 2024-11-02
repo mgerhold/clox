@@ -184,6 +184,10 @@ static void number() {
     emit_constant(NUMBER_VAL(value));
 }
 
+static void string() {
+    emit_constant(OBJ_VAL(copy_string(parser.previous.start + 1, parser.previous.length - 2)));
+}
+
 static void unary() {
     auto const operator_type = parser.previous.type;
 
@@ -222,7 +226,7 @@ static ParseRule const rules[] = {
     [TOKEN_EQUAL]         = { nullptr,  nullptr, PREC_NONE       },
     [TOKEN_EQUAL_EQUAL]   = { nullptr,  binary,  PREC_EQUALITY   },
     [TOKEN_IDENTIFIER]    = { nullptr,  nullptr, PREC_NONE       },
-    [TOKEN_STRING]        = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_STRING]        = { string,   nullptr, PREC_NONE       },
     [TOKEN_NUMBER]        = { number,   nullptr, PREC_NONE       },
     [TOKEN_AND]           = { nullptr,  nullptr, PREC_NONE       },
     [TOKEN_CLASS]         = { nullptr,  nullptr, PREC_NONE       },

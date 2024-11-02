@@ -1,5 +1,6 @@
 #include "memory.h"
 #include <stdlib.h>
+#include "vm.h"
 
 void* reallocate(void* const pointer, size_t, size_t const new_size) {
     if (new_size == 0) {
@@ -12,4 +13,22 @@ void* reallocate(void* const pointer, size_t, size_t const new_size) {
         exit(EXIT_FAILURE);
     }
     return result;
+}
+
+static void free_object(Obj* const object) {
+    switch (object->type) {
+        case OBJ_STRING: {
+            FREE(ObjString, object);
+            break;
+        }
+    }
+}
+
+void free_objects() {
+    auto object = vm.objects;
+    while (object != nullptr) {
+        auto const next = object->next;
+        free_object(object);
+        object = next;
+    }
 }
