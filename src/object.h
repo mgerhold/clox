@@ -22,11 +22,13 @@ struct Obj {
 struct ObjString {
     Obj obj;
     int length;
+    uint32_t hash;
     char chars[];
 };
 
-[[nodiscard]] ObjString* reserve_string(int length);
-[[nodiscard]] ObjString* copy_string(char const* chars, int length);
+[[nodiscard]] uint32_t hash_string(char const* chars, int length);
+[[nodiscard]] ObjString* reserve_string(int length, uint32_t hash);
+[[nodiscard]] ObjString const* copy_string(char const* chars, int length);
 void print_object(Value value);
 
 static inline bool is_obj_type(Value const value, ObjType const type) {

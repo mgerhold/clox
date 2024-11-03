@@ -30,9 +30,11 @@ static void runtime_error(char const* const format, ...) {
 void init_vm() {
     reset_stack();
     vm.objects = nullptr;
+    init_table(&vm.strings);
 }
 
 void free_vm() {
+    free_table(&vm.strings);
     free_objects();
 }
 
@@ -53,14 +55,36 @@ void push(Value const value) {
 }
 
 static void concatenate() {
+    // We first have to create a new string that contains the concatenated contents
+    // of the source strings. But if the new string is equal to a string that already
+    // has been interned, we will free it immediately. In that case, however, we have
+    // to restore the implicit object list to prevent a double free when the VM exits.
+    // To be able to do this, we store the head of the objects list as it was before
+    // creating a new object.
+    auto const objects_list_head = vm.objects;
+
     auto const b = AS_STRING(pop());
     auto const a = AS_STRING(pop());
     auto const length = a->length + b->length;
-    auto const result = reserve_string(length);
+    auto const result = reserve_string(length, 0 /* Hash to be filled below. */);
     memcpy(result->chars, a->chars, (size_t)a->length);
     memcpy(result->chars + a->length, b->chars, (size_t)b->length);
+    auto const hash = hash_string(result->chars, length);
+    result->hash = hash;
     assert(result->chars[length] == '\0' and "reserve_string() shall create a null-terminated string");
-    push(OBJ_VAL(result));
+
+    // Check if a string with this content already has been interned.
+    auto const interned = table_find_string(&vm.strings, result->chars, length, hash);
+    if (interned != nullptr) {
+        FREE(ObjString, result);
+        // Restore object list.
+        vm.objects = objects_list_head;
+        push(OBJ_VAL(interned));
+    } else {
+        // Intern the concatenated string.
+        table_set(&vm.strings, result, NIL_VAL);
+        push(OBJ_VAL(result));
+    }
 }
 
 [[nodiscard]] static InterpretResult run() {
