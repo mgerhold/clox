@@ -9,7 +9,7 @@ typedef struct {
 } Entry;
 
 typedef struct {
-    int count;
+    int count; // total number of elements and tombstones
     int capacity;
     Entry* entries;
 } Table;
