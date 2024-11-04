@@ -30,10 +30,13 @@ static void runtime_error(char const* const format, ...) {
 void init_vm() {
     reset_stack();
     vm.objects = nullptr;
+
+    init_table(&vm.globals);
     init_table(&vm.strings);
 }
 
 void free_vm() {
+    free_table(&vm.globals);
     free_table(&vm.strings);
     free_objects();
 }
@@ -90,6 +93,7 @@ static void concatenate() {
 [[nodiscard]] static InterpretResult run() {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+#define READ_STRING() AS_STRING(READ_CONSTANT())
 #define BINARY_OP(value_type, op) \
     do { \
         if (not IS_NUMBER(peek(0)) or not IS_NUMBER(peek(1))) { \
@@ -140,6 +144,23 @@ static void concatenate() {
             case OP_NIL:      push(NIL_VAL);                    break;
             case OP_TRUE:     push(BOOL_VAL(true));             break;
             case OP_FALSE:    push(BOOL_VAL(false));            break;
+            case OP_POP:      (void)pop();                      break;
+            case OP_GET_GLOBAL: {
+                auto const name = READ_STRING();
+                Value value;
+                if (not table_get(&vm.globals, name, &value)) {
+                    runtime_error("Undefined variable '%s'.", name->chars);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(value);
+                break;
+            }
+            case OP_DEFINE_GLOBAL: {
+                auto const name = READ_STRING();
+                table_set(&vm.globals, name, peek(0));
+                (void)pop();
+                break;
+            }
             case OP_GREATER:  BINARY_OP(BOOL_VAL, >);           break;
             case OP_LESS:     BINARY_OP(BOOL_VAL, <);           break;
             case OP_ADD: {
@@ -159,15 +180,27 @@ static void concatenate() {
             case OP_MULTIPLY: BINARY_OP(NUMBER_VAL, *);         break;
             case OP_DIVIDE:   BINARY_OP(NUMBER_VAL, /);         break;
             case OP_NOT:      push(BOOL_VAL(is_falsey(pop()))); break;
+            case OP_SET_GLOBAL: {
+                auto const name = READ_STRING();
+                if (table_set(&vm.globals, name, peek(0))) {
+                    table_delete(&vm.globals, name);
+                    runtime_error("Undefined variable '%s'.", name->chars);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
             case OP_EQUAL: {
                 auto const b = pop();
                 auto const a = pop();
                 push(BOOL_VAL(values_equal(a, b)));
                 break;
             }
-            case OP_RETURN: {
+            case OP_PRINT:
                 print_value(pop());
                 printf("\n");
+                break;
+            case OP_RETURN: {
+                // Exit interpreter.
                 return INTERPRET_OK;
             }
         }
@@ -176,6 +209,7 @@ static void concatenate() {
 
 #undef READ_BYTE
 #undef READ_CONSTANT
+#undef READ_STRING
 #undef BINARY_OP
 }
 
