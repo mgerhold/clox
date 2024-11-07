@@ -10,9 +10,8 @@ void disassemble_chunk(Chunk* const chunk, char const* const name) {
 }
 
 [[nodiscard]] static int simple_instruction(char const* name, int offset);
-
+[[nodiscard]] static int byte_instruction(char const* name, Chunk const* chunk, int offset);
 [[nodiscard]] static int constant_instruction(char const* name, Chunk const* chunk, int offset);
-
 [[nodiscard]] int constant_long_instruction(char const* name, Chunk const* chunk, int offset);
 
 int disassemble_instruction(Chunk const* const chunk, int const offset) {
@@ -32,6 +31,8 @@ int disassemble_instruction(Chunk const* const chunk, int const offset) {
         case OP_TRUE:          return simple_instruction("OP_TRUE", offset);
         case OP_FALSE:         return simple_instruction("OP_FALSE", offset);
         case OP_POP:           return simple_instruction("OP_POP", offset);
+        case OP_GET_LOCAL:     return byte_instruction("OP_GET_LOCAL", chunk, offset);
+        case OP_SET_LOCAL:     return byte_instruction("OP_SET_LOCAL", chunk, offset);
         case OP_GET_GLOBAL:    return constant_instruction("OP_GET_GLOBAL", chunk, offset);
         case OP_DEFINE_GLOBAL: return constant_instruction("OP_DEFINE_GLOBAL", chunk, offset);
         case OP_SET_GLOBAL:    return constant_instruction("OP_SET_GLOBAL", chunk, offset);
@@ -56,6 +57,12 @@ int disassemble_instruction(Chunk const* const chunk, int const offset) {
 [[nodiscard]] static int simple_instruction(char const* const name, int const offset) {
     printf("%s\n", name);
     return offset + 1;
+}
+
+[[nodiscard]] static int byte_instruction(char const* const name, Chunk const* const chunk, int const offset) {
+    auto const slot = chunk->code[offset + 1];
+    printf("%-16s %4d\n", name, slot);
+    return offset + 2;
 }
 
 [[nodiscard]] static int constant_instruction(char const* const name, Chunk const* const chunk, int const offset) {

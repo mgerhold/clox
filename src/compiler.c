@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
 #include "common.h"
 #include "scanner.h"
 
@@ -38,7 +40,19 @@ typedef struct {
     Precedence precedence;
 } ParseRule;
 
+typedef struct {
+    Token name;
+    int depth;
+} Local;
+
+typedef struct {
+    Local locals[UINT8_COUNT];
+    int local_count;
+    int scope_depth;
+} Compiler;
+
 Parser parser;
+Compiler* current = nullptr;
 Chunk* compiling_chunk;
 
 [[nodiscard]] static Chunk* current_chunk() {
@@ -141,6 +155,12 @@ static void emit_constant(Value const value) {
     }
 }
 
+static void init_compiler(Compiler* const compiler) {
+    compiler->local_count = 0;
+    compiler->scope_depth = 0;
+    current = compiler;
+}
+
 static void end_compiler() {
 #ifdef DEBUG_PRINT_CODE
     if (not parser.had_error) {
@@ -148,6 +168,19 @@ static void end_compiler() {
     }
 #endif
     emit_return();
+}
+
+static void begin_scope() {
+    ++current->scope_depth;
+}
+
+static void end_scope() {
+    --current->scope_depth;
+
+    while (current->local_count > 0 and current->locals[current->local_count - 1].depth > current->scope_depth) {
+        emit_byte(OP_POP);
+        --current->local_count;
+    }
 }
 
 static void expression();
@@ -203,15 +236,29 @@ static void string(bool) {
 }
 
 [[nodiscard]] static uint8_t identifier_constant(Token const* name);
+[[nodiscard]] static int resolve_local(Compiler const* compiler, Token const* name);
 
 static void named_variable(Token const name, bool const can_assign) {
-    auto const arg = identifier_constant(&name);
+    uint8_t get_op;
+    uint8_t set_op;
+
+    auto arg = resolve_local(current, &name);
+    if (arg != -1) {
+        get_op = OP_GET_LOCAL;
+        set_op = OP_SET_LOCAL;
+    } else {
+        arg = identifier_constant(&name);
+        get_op = OP_GET_GLOBAL;
+        set_op = OP_SET_GLOBAL;
+    }
+
+    assert(arg >= 0);
 
     if (can_assign and match(TOKEN_EQUAL)) {
         expression();
-        emit_bytes(OP_SET_GLOBAL, arg);
+        emit_bytes(set_op, (uint8_t)arg);
     } else {
-        emit_bytes(OP_GET_GLOBAL, arg);
+        emit_bytes(get_op, (uint8_t)arg);
     }
 }
 
@@ -311,12 +358,81 @@ static void parse_precedence(Precedence const precedence) {
     return (uint8_t)constant_index;
 }
 
+[[nodiscard]] static bool identifiers_equal(Token const* const a, Token const* const b) {
+    if (a->length != b->length) {
+        return false;
+    }
+    return memcmp(a->start, b->start, (size_t)a->length) == 0;
+}
+
+[[nodiscard]] static int resolve_local(Compiler const* const compiler, Token const* const name) {
+    for (auto i = compiler->local_count - 1; i >= 0; --i) {
+        auto const local = &compiler->locals[i];
+        if (identifiers_equal(name, &local->name)) {
+            if (local->depth == -1) {
+                error("Can't read local variable in its own initializer.");
+            }
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void add_local(Token const name) {
+    if (current->local_count == UINT8_COUNT) {
+        error("Too many local variables in function.");
+        return;
+    }
+
+    auto const local = &current->locals[current->local_count++];
+    local->name = name;
+    local->depth = -1;  // Special sentinel value to mark the variable as "uninitialized".
+}
+
+static void declare_variable() {
+    if (current->scope_depth == 0) {
+        // This is a global variable.
+        return;
+    }
+
+    auto const name = &parser.previous;
+
+    for (auto i = current->local_count - 1; i >= 0; --i) {
+        auto const local = &current->locals[i];
+        if (local->depth != -1 and local->depth < current->scope_depth) {
+            break;
+        }
+
+        if (identifiers_equal(name, &local->name)) {
+            error("Already a variable with this name in this scope.");
+        }
+    }
+
+    add_local(*name);
+}
+
 [[nodiscard]] static uint8_t parse_variable(char const* const error_message) {
     consume(TOKEN_IDENTIFIER, error_message);
+
+    declare_variable();
+    if (current->scope_depth > 0) {
+        // For local variables, we don't need to store them in the constants table.
+        return 0;
+    }
+
     return identifier_constant(&parser.previous);
 }
 
+static void mark_initialized() {
+    current->locals[current->local_count - 1].depth = current->scope_depth;
+}
+
 static void define_variable(uint8_t const global) {
+    if (current->scope_depth > 0) {
+        // This is a local variable.
+        mark_initialized();
+        return;
+    }
     emit_bytes(OP_DEFINE_GLOBAL, global);
 }
 
@@ -326,6 +442,14 @@ static void define_variable(uint8_t const global) {
 
 static void expression() {
     parse_precedence(PREC_ASSIGNMENT);
+}
+
+static void block() {
+    while (not check(TOKEN_RIGHT_BRACE) and not check(TOKEN_EOF)) {
+        declaration();
+    }
+
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
 }
 
 static void var_declaration() {
@@ -393,6 +517,10 @@ static void declaration() {
 static void statement() {
     if (match(TOKEN_PRINT)) {
         print_statement();
+    } else if (match(TOKEN_LEFT_BRACE)) {
+        begin_scope();
+        block();
+        end_scope();
     } else {
         expression_statement();
     }
@@ -400,6 +528,8 @@ static void statement() {
 
 [[nodiscard]] bool compile(char const* const source, Chunk* const chunk) {
     init_scanner(source);
+    Compiler compiler;
+    init_compiler(&compiler);
     compiling_chunk = chunk;
 
     parser.had_error = false;

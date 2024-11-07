@@ -145,6 +145,16 @@ static void concatenate() {
             case OP_TRUE:     push(BOOL_VAL(true));             break;
             case OP_FALSE:    push(BOOL_VAL(false));            break;
             case OP_POP:      (void)pop();                      break;
+            case OP_GET_LOCAL: {
+                auto const slot = READ_BYTE();
+                push(vm.stack[slot]);
+                break;
+            }
+            case OP_SET_LOCAL: {
+                auto const slot = READ_BYTE();
+                vm.stack[slot] = peek(0);
+                break;
+            }
             case OP_GET_GLOBAL: {
                 auto const name = READ_STRING();
                 Value value;
