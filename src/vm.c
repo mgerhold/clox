@@ -92,6 +92,8 @@ static void concatenate() {
 
 [[nodiscard]] static InterpretResult run() {
 #define READ_BYTE() (*vm.ip++)
+#define READ_SHORT() \
+    (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8 | vm.ip[-1])))
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
 #define READ_STRING() AS_STRING(READ_CONSTANT())
 #define BINARY_OP(value_type, op) \
@@ -209,6 +211,23 @@ static void concatenate() {
                 print_value(pop());
                 printf("\n");
                 break;
+            case OP_JUMP: {
+                auto const offset = READ_SHORT();
+                vm.ip += offset;
+                break;
+            }
+            case OP_JUMP_IF_FALSE: {
+                auto const offset = READ_SHORT();
+                if (is_falsey(peek(0))) {
+                    vm.ip += offset;
+                }
+                break;
+            }
+            case OP_LOOP: {
+                auto const offset = READ_SHORT();
+                vm.ip -= offset;
+                break;
+            }
             case OP_RETURN: {
                 // Exit interpreter.
                 return INTERPRET_OK;
@@ -218,6 +237,7 @@ static void concatenate() {
     }
 
 #undef READ_BYTE
+#undef READ_SHORT
 #undef READ_CONSTANT
 #undef READ_STRING
 #undef BINARY_OP

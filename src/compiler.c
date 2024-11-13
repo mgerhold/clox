@@ -129,6 +129,25 @@ static void emit_bytes(uint8_t const byte1, uint8_t const byte2) {
     emit_byte(byte2);
 }
 
+static void emit_loop(int const loop_start) {
+    emit_byte(OP_LOOP);
+
+    auto const offset = current_chunk()->count - loop_start + 2;
+    if (offset > UINT16_MAX) {
+        error("Loop body too large.");
+    }
+
+    emit_byte((uint8_t)((offset >> 8) & 0xFF));
+    emit_byte((uint8_t)(offset & 0xFF));
+}
+
+static int emit_jump(uint8_t const instruction) {
+    emit_byte(instruction);
+    emit_byte(0xFF);
+    emit_byte(0xFF);
+    return current_chunk()->count - 2;
+}
+
 static void emit_return() {
     emit_byte(OP_RETURN);
 }
@@ -153,6 +172,18 @@ static void emit_constant(Value const value) {
             emit_byte(bytes[i]);
         }
     }
+}
+
+static void patch_jump(int const offset) {
+    // -2 to adjust for the bytecode for the jump offset itself.
+    auto const jump_distance = current_chunk()->count - offset - 2;
+
+    if (jump_distance > UINT16_MAX) {
+        error("Too much code to jump over.");
+    }
+
+    current_chunk()->code[offset] = (uint8_t)((jump_distance >> 8) & 0xFF);
+    current_chunk()->code[offset + 1] = (uint8_t)(jump_distance & 0xFF);
 }
 
 static void init_compiler(Compiler* const compiler) {
@@ -231,6 +262,24 @@ static void number(bool) {
     emit_constant(NUMBER_VAL(value));
 }
 
+static void or_(bool) {
+    auto const else_jump = emit_jump(OP_JUMP_IF_FALSE);
+    auto const end_jump = emit_jump(OP_JUMP);
+
+    patch_jump(else_jump);
+    emit_byte(OP_POP);
+
+    parse_precedence(PREC_OR);
+    patch_jump(end_jump);
+}
+
+static void and_(bool) {
+    auto const end_jump = emit_jump(OP_JUMP_IF_FALSE);
+    emit_byte(OP_POP);
+    parse_precedence(PREC_AND);
+    patch_jump(end_jump);
+}
+
 static void string(bool) {
     emit_constant(OBJ_VAL(copy_string(parser.previous.start + 1, parser.previous.length - 2)));
 }
@@ -306,7 +355,7 @@ static ParseRule const rules[] = {
     [TOKEN_IDENTIFIER]    = { variable, nullptr, PREC_NONE       },
     [TOKEN_STRING]        = { string,   nullptr, PREC_NONE       },
     [TOKEN_NUMBER]        = { number,   nullptr, PREC_NONE       },
-    [TOKEN_AND]           = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_AND]           = { nullptr,  and_,    PREC_AND        },
     [TOKEN_CLASS]         = { nullptr,  nullptr, PREC_NONE       },
     [TOKEN_ELSE]          = { nullptr,  nullptr, PREC_NONE       },
     [TOKEN_FALSE]         = { literal,  nullptr, PREC_NONE       },
@@ -314,7 +363,7 @@ static ParseRule const rules[] = {
     [TOKEN_FUN]           = { nullptr,  nullptr, PREC_NONE       },
     [TOKEN_IF]            = { nullptr,  nullptr, PREC_NONE       },
     [TOKEN_NIL]           = { literal,  nullptr, PREC_NONE       },
-    [TOKEN_OR]            = { nullptr,  nullptr, PREC_NONE       },
+    [TOKEN_OR]            = { nullptr,  or_,     PREC_NONE       },
     [TOKEN_PRINT]         = { nullptr,  nullptr, PREC_NONE       },
     [TOKEN_RETURN]        = { nullptr,  nullptr, PREC_NONE       },
     [TOKEN_SUPER]         = { nullptr,  nullptr, PREC_NONE       },
@@ -471,10 +520,89 @@ static void expression_statement() {
     emit_byte(OP_POP);
 }
 
+static void for_statement() {
+    begin_scope();
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
+    if (match(TOKEN_SEMICOLON)) {
+        // No initializer.
+    } else if (match(TOKEN_VAR)) {
+        var_declaration();
+    } else {
+        expression_statement();
+    }
+
+    auto loop_start = current_chunk()->count;
+    auto exit_jump = -1;
+    if (not match(TOKEN_SEMICOLON)) {
+        expression();
+        consume(TOKEN_SEMICOLON, "Expect ';' after loop condition.");
+
+        // Jump out of the loop if the condition is false.
+        exit_jump = emit_jump(OP_JUMP_IF_FALSE);
+        emit_byte(OP_POP); // Condition.
+    }
+
+    if (not match(TOKEN_RIGHT_PAREN)) {
+        auto const body_jump = emit_jump(OP_JUMP);
+        auto const increment_start = current_chunk()->count;
+        expression();
+        emit_byte(OP_POP);
+        consume(TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.");
+
+        emit_loop(loop_start);
+        loop_start = increment_start;
+        patch_jump(body_jump);
+    }
+
+    statement();
+    emit_loop(loop_start);
+
+    if (exit_jump != -1) {
+        patch_jump(exit_jump);
+        emit_byte(OP_POP); // Condition.
+    }
+
+    end_scope();
+}
+
+static void if_statement() {
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'if'.");
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after 'if'.");
+
+    auto const then_jump = emit_jump(OP_JUMP_IF_FALSE);
+    emit_byte(OP_POP);
+    statement();
+    auto const else_jump = emit_jump(OP_JUMP);
+
+    patch_jump(then_jump);
+
+    emit_byte(OP_POP);
+    if (match(TOKEN_ELSE)) {
+        statement();
+    }
+    patch_jump(else_jump);
+}
+
 static void print_statement() {
     expression();
     consume(TOKEN_SEMICOLON, "Expect ';' after value.");
     emit_byte(OP_PRINT);
+}
+
+static void while_statement() {
+    auto const loop_start = current_chunk()->count;
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
+
+    auto const exit_jump = emit_jump(OP_JUMP_IF_FALSE);
+    emit_byte(OP_POP);
+    statement();
+    emit_loop(loop_start);
+
+    patch_jump(exit_jump);
+    emit_byte(OP_POP);
 }
 
 static void synchronize() {
@@ -517,6 +645,12 @@ static void declaration() {
 static void statement() {
     if (match(TOKEN_PRINT)) {
         print_statement();
+    } else if (match(TOKEN_FOR)) {
+        for_statement();
+    } else if (match(TOKEN_IF)) {
+        if_statement();
+    } else if (match(TOKEN_WHILE)) {
+        while_statement();
     } else if (match(TOKEN_LEFT_BRACE)) {
         begin_scope();
         block();
