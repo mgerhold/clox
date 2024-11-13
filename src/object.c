@@ -8,15 +8,28 @@
 
 #define ALLOCATE_OBJ(type, object_type) (type*)allocate_object(sizeof(type), object_type)
 
-// TODO: is this still necessary?
-/*static Obj* allocate_object(size_t const size, ObjType const type) {
+static Obj* allocate_object(size_t const size, ObjType const type) {
     auto const object = (Obj*)reallocate(nullptr, 0, size);
     object->type = type;
 
     object->next = vm.objects;
     vm.objects = object;
     return object;
-}*/
+}
+
+[[nodiscard]] ObjFunction* new_function() {
+    auto const function = ALLOCATE_OBJ(ObjFunction, OBJ_FUNCTION);
+    function->arity = 0;
+    function->name = nullptr;
+    init_chunk(&function->chunk);
+    return function;
+}
+
+[[nodiscard]] ObjNative* new_native(NativeFn const function) {
+    auto const native = ALLOCATE_OBJ(ObjNative, OBJ_NATIVE);
+    native->function = function;
+    return native;
+}
 
 [[nodiscard]] uint32_t hash_string(char const* const chars, int const length) {
     auto hash = 2166136261u;
@@ -56,10 +69,24 @@
     return string_obj;
 }
 
+static void print_function(ObjFunction const* const function) {
+    if (function->name == nullptr) {
+        printf("<script>");
+        return;
+    }
+    printf("<fn %s>", function->name->chars);
+}
+
 void print_object(Value const value) {
     switch (OBJ_TYPE(value)) {
         case OBJ_STRING:
             printf("%s", AS_CSTRING(value));
+            break;
+        case OBJ_FUNCTION:
+            print_function(AS_FUNCTION(value));
+            break;
+        case OBJ_NATIVE:
+            printf("<native fn>");
             break;
     }
 }

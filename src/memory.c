@@ -17,8 +17,17 @@ void* reallocate(void* const pointer, size_t, size_t const new_size) {
 
 static void free_object(Obj* const object) {
     switch (object->type) {
-        case OBJ_STRING: {
+        case OBJ_STRING:
             FREE(ObjString, object);
+            break;
+        case OBJ_FUNCTION: {
+            auto const function = (ObjFunction*)object;
+            free_chunk(&function->chunk);
+            FREE(ObjFunction, object);
+            break;
+        }
+        case OBJ_NATIVE: {
+            FREE(ObjNative, object);
             break;
         }
     }
