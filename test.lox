@@ -1,11 +1,10 @@
-fun fib(n) {
-    if (n < 2) {
-        return n;
+fun outer() {
+    var x = "outside";
+    fun inner() {
+        print x;
     }
-    return fib(n - 2) + fib(n - 1);
+    return inner;
 }
 
-var n = read_number("Enter a number: ");
-var start = clock();
-print fib(n);
-print clock() - start;
+var closure = outer();
+closure();

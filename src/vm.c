@@ -40,6 +40,7 @@ static Value read_number_native(int const args_count, Value* const args) {
 static void reset_stack() {
     vm.stack_top = vm.stack;
     vm.frame_count = 0;
+    vm.open_upvalues = nullptr;
 }
 
 static void runtime_error(char const* const format, ...) {
@@ -51,7 +52,7 @@ static void runtime_error(char const* const format, ...) {
 
     for (auto i = vm.frame_count - 1; i >= 0; --i) {
         auto const frame = &vm.frames[i];
-        auto const function = frame->function;
+        auto const function = frame->closure->function;
         auto const instruction = (size_t)(frame->ip - function->chunk.code - 1);
         fprintf(stderr, "[line %d] in ", function->chunk.lines[instruction]);
         if (function->name == nullptr) {
@@ -101,9 +102,9 @@ void push(Value const value) {
     return vm.stack_top[-1 - distance];
 }
 
-[[nodiscard]] static bool call(ObjFunction const* const function, int const arg_count) {
-    if (arg_count != function->arity) {
-        runtime_error("Expected %d arguments, but got %d.", function->arity, arg_count);
+[[nodiscard]] static bool call(ObjClosure const* const closure, int const arg_count) {
+    if (arg_count != closure->function->arity) {
+        runtime_error("Expected %d arguments, but got %d.", closure->function->arity, arg_count);
         return false;
     }
 
@@ -113,8 +114,8 @@ void push(Value const value) {
     }
 
     auto const frame = &vm.frames[vm.frame_count++];
-    frame->function = function;
-    frame->ip = function->chunk.code;
+    frame->closure = closure;
+    frame->ip = closure->function->chunk.code;
     frame->slots = vm.stack_top - arg_count - 1;
     return true;
 }
@@ -122,8 +123,8 @@ void push(Value const value) {
 [[nodiscard]] static bool call_value(Value const callee, int const arg_count) {
     if (IS_OBJ(callee)) {
         switch (OBJ_TYPE(callee)) {
-            case OBJ_FUNCTION:
-                return call(AS_FUNCTION(callee), arg_count);
+            case OBJ_CLOSURE:
+                return call(AS_CLOSURE(callee), arg_count);
             case OBJ_NATIVE:
                 auto const native = AS_NATIVE(callee);
                 auto const result = native(arg_count, vm.stack_top - arg_count);
@@ -136,6 +137,35 @@ void push(Value const value) {
     }
     runtime_error("Can only call functions and classes.");
     return false;
+}
+
+[[nodiscard]] static ObjUpvalue* capture_upvalue(Value* const local) {
+    auto prev_upvalue = (ObjUpvalue*)nullptr;
+    auto upvalue = vm.open_upvalues;
+    while (upvalue != nullptr and upvalue->location > local) {
+        prev_upvalue = upvalue;
+        upvalue = upvalue->next;
+    }
+
+    if (upvalue != nullptr and upvalue->location == local) {
+        return upvalue;
+    }
+
+    auto const created_upvalue = new_upvalue(local);
+    created_upvalue->next = upvalue;
+
+    (prev_upvalue == nullptr ? vm.open_upvalues : prev_upvalue->next) = created_upvalue;
+
+    return created_upvalue;
+}
+
+static void close_upvalues(Value const* const last) {
+    while (vm.open_upvalues != nullptr and vm.open_upvalues->location >= last) {
+        auto const upvalue = vm.open_upvalues;
+        upvalue->closed = *upvalue->location;
+        upvalue->location = &upvalue->closed;
+        vm.open_upvalues = upvalue->next;
+    }
 }
 
 [[nodiscard]] static bool is_falsey(Value const value) {
@@ -180,7 +210,7 @@ static void concatenate() {
 
 #define READ_BYTE() (*frame->ip++)
 #define READ_SHORT() (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8 | frame->ip[-1])))
-#define READ_CONSTANT() (frame->function->chunk.constants.values[READ_BYTE()])
+#define READ_CONSTANT() (frame->closure->function->chunk.constants.values[READ_BYTE()])
 #define READ_STRING() AS_STRING(READ_CONSTANT())
 #define BINARY_OP(value_type, op) \
     do { \
@@ -202,7 +232,7 @@ static void concatenate() {
             printf(" ]");
         }
         printf("\n");
-        disassemble_instruction(&frame->function->chunk, (int)(frame->ip - frame->function->chunk.code));
+        disassemble_instruction(&frame->closure->function->chunk, (int)(frame->ip - frame->closure->function->chunk.code));
 #endif
         uint8_t instruction;
         // clang-format off
@@ -218,7 +248,7 @@ static void concatenate() {
                 bytes[1] = READ_BYTE();
                 bytes[2] = READ_BYTE();
                 auto const constant_index = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
-                auto const constant = frame->function->chunk.constants.values[constant_index];
+                auto const constant = frame->closure->function->chunk.constants.values[constant_index];
                 push(constant);
                 break;
             }
@@ -287,6 +317,16 @@ static void concatenate() {
                 }
                 break;
             }
+            case OP_GET_UPVALUE: {
+                auto const slot = READ_BYTE();
+                push(*frame->closure->upvalues[slot]->location);
+                break;
+            }
+            case OP_SET_UPVALUE: {
+                auto const slot = READ_BYTE();
+                *frame->closure->upvalues[slot]->location = peek(0);
+                break;
+            }
             case OP_EQUAL: {
                 auto const b = pop();
                 auto const a = pop();
@@ -322,8 +362,28 @@ static void concatenate() {
                 frame = &vm.frames[vm.frame_count - 1];
                 break;
             }
+            case OP_CLOSURE: {
+                auto const function = AS_FUNCTION(READ_CONSTANT());
+                auto const closure = new_closure(function);
+                push(OBJ_VAL(closure));
+                for (auto i = 0; i < closure->upvalue_count; ++i) {
+                    auto const is_local = READ_BYTE();
+                    auto const index = READ_BYTE();
+                    if (is_local == 1) {
+                        closure->upvalues[i] = capture_upvalue(frame->slots + index);
+                    } else {
+                        closure->upvalues[i] = frame->closure->upvalues[index];
+                    }
+                }
+                break;
+            }
+            case OP_CLOSE_UPVALUE:
+                close_upvalues(vm.stack_top - 1);
+                (void)pop();
+                break;
             case OP_RETURN: {
                 auto const result = pop();
+                close_upvalues(frame->slots);
                 --vm.frame_count;
                 if (vm.frame_count == 0) {
                     (void)pop(); // Pop the main script function.
@@ -353,6 +413,9 @@ static void concatenate() {
     }
 
     push(OBJ_VAL(function));
-    (void)call(function, 0);
+    auto const closure = new_closure(function);
+    (void)pop();
+    push(OBJ_VAL(closure));
+    (void)call(closure, 0);
     return run();
 }

@@ -1,5 +1,6 @@
 #include "debug.h"
 #include <stdio.h>
+#include "object.h"
 #include "value.h"
 
 void disassemble_chunk(Chunk* const chunk, char const* const name) {
@@ -15,7 +16,7 @@ void disassemble_chunk(Chunk* const chunk, char const* const name) {
 [[nodiscard]] static int constant_instruction(char const* name, Chunk const* chunk, int offset);
 [[nodiscard]] int constant_long_instruction(char const* name, Chunk const* chunk, int offset);
 
-int disassemble_instruction(Chunk const* const chunk, int const offset) {
+int disassemble_instruction(Chunk const* const chunk, int offset) {
     printf("%04d ", offset);
     if (offset > 0 and chunk->lines[offset] == chunk->lines[offset - 1]) {
         printf("   | ");
@@ -46,6 +47,30 @@ int disassemble_instruction(Chunk const* const chunk, int const offset) {
         case OP_JUMP_IF_FALSE: return jump_instruction("OP_JUMP_IF_FALSE", 1, chunk, offset);
         case OP_LOOP:          return jump_instruction("OP_LOOP", -1, chunk, offset);
         case OP_CALL:          return byte_instruction("OP_CALL", chunk, offset);
+        case OP_CLOSURE: {
+            ++offset;
+            auto const constant = chunk->code[offset++];
+            printf("%-16s %4d ", "OP_CLOSURE", constant);
+            print_value(chunk->constants.values[constant]);
+            printf("\n");
+
+            auto const function = AS_FUNCTION(chunk->constants.values[constant]);
+            for (auto j = 0; j < function->upvalue_count; ++j) {
+                auto const is_local = chunk->code[offset++];
+                auto const index = chunk->code[offset++];
+                printf(
+                    "%04d      |                     %s %d\n",
+                    offset - 2,
+                    is_local ? "local" : "upvalue",
+                    index
+                );
+            }
+
+            return offset;
+        }
+        case OP_GET_UPVALUE:   return byte_instruction("OP_GET_UPVALUE", chunk, offset);
+        case OP_SET_UPVALUE:   return byte_instruction("OP_SET_UPVALUE", chunk, offset);
+        case OP_CLOSE_UPVALUE: return simple_instruction("OP_CLOSE_UPVALUE", offset);
         case OP_RETURN:        return simple_instruction("OP_RETURN", offset);
         case OP_ADD:           return simple_instruction("OP_ADD", offset);
         case OP_SUBTRACT:      return simple_instruction("OP_SUBTRACT", offset);
